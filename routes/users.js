@@ -33,6 +33,10 @@ userRouter.use(authController.protectVerified);
 userRouter.get("/me", userController.getMe, userController.getUser);
 userRouter.patch("/updateMyPassword", authController.updatePassword);
 userRouter.patch("/updateMe", userController.updateMe);
+
+userRouter.patch("/requestEmailChange", authController.requestEmailChange);
+userRouter.post("/confirmEmailChange", authController.confirmEmailChange);
+
 userRouter.patch("/disableMe", userController.disableMe);
 userRouter.delete("/deleteMe", userController.deleteMe);
 
