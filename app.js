@@ -7,8 +7,11 @@ import cookieParser from "cookie-parser";
 import ExpressMongoSanitize from "express-mongo-sanitize";
 import xss from "xss-clean";
 import hpp from "hpp";
-
+import globalErrorHandler from "./controllers/error.js";
+import AppError from "./utils/appError.js";
 import compression from "compression";
+import userRouter from "./routes/users.js";
+import adminRouter from "./routes/admin.js";
 
 const app = express();
 
@@ -58,5 +61,15 @@ app.use(
 app.use(compression());
 
 app.get("/ip", (req, res) => res.send(req.ip));
+app.use("/api/users", userRouter);
+app.use("/api/admin", adminRouter);
+
+// HANDLE UNDEFINED ERRORS
+app.all("*", (req, res, next) => {
+  next(new AppError(`Can't find ${req.originalUrl} on this server!`, 404));
+});
+
+// GLOBAL ERROR HANDLER
+app.use(globalErrorHandler);
 
 export default app;
