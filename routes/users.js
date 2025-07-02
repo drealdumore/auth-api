@@ -37,6 +37,8 @@ userRouter.patch("/updateMe", userController.updateMe);
 userRouter.patch("/requestEmailChange", authController.requestEmailChange);
 userRouter.post("/confirmEmailChange", authController.confirmEmailChange);
 
+userRouter.post("/verifyEmailUpdate", userController.verifyEmailUpdate);
+
 userRouter.patch("/disableMe", userController.disableMe);
 userRouter.delete("/deleteMe", userController.deleteMe);
 

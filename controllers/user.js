@@ -2,6 +2,8 @@ import User from "../models/User.js";
 import AppError from "../utils/appError.js";
 import { filterObj } from "../utils/filterObj.js";
 import asyncHandler from "express-async-handler";
+import Email from "../utils/email.js";
+import { NAME_REGEX, EMAIL_REGEX } from "../utils/validation.js";
 
 const userController = {
   updateMe: asyncHandler(async (req, res, next) => {
@@ -22,7 +24,7 @@ const userController = {
 
     if (firstName) {
       const trimmedFirstName = firstName.trim();
-      if (!/^[a-zA-Z0-9 -]+$/.test(trimmedFirstName)) {
+      if (!NAME_REGEX.test(trimmedFirstName)) {
         return next(new AppError("Invalid first name!", 401));
       }
       updates.firstName = trimmedFirstName;
@@ -30,25 +32,51 @@ const userController = {
 
     if (lastName) {
       const trimmedLastName = lastName.trim();
-      if (!/^[a-zA-Z0-9 -]+$/.test(trimmedLastName)) {
+      if (!NAME_REGEX.test(trimmedLastName)) {
         return next(new AppError("Invalid last name!", 401));
       }
       updates.lastName = trimmedLastName;
     }
 
-    if (email) {
-      const trimmedEmail = email.trim();
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
-        return next(new AppError("Invalid email format!", 401));
-      }
-      updates.email = trimmedEmail;
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return next(new AppError("User not found", 404));
     }
 
-    // 3) Prevent updating other fields
-    const allowedFields = ["firstName", "lastName", "email"];
+    if (email && email !== user.email) {
+      const trimmedEmail = email.trim();
+      if (!EMAIL_REGEX.test(trimmedEmail)) {
+        return next(new AppError("Invalid email format!", 401));
+      }
+
+      // Generate verification code
+      const verificationCode = Math.floor(
+        100000 + Math.random() * 900000
+      ).toString();
+
+      user.pendingEmail = trimmedEmail;
+      user.pendingEmailVerificationCode = verificationCode;
+      user.pendingEmailVerificationExpires = Date.now() + 10 * 60 * 1000; // 10 mins
+      await user.save({ validateBeforeSave: false });
+
+      try {
+        const sendEmail = new Email(user, verificationCode);
+        await sendEmail.sendEmailVerificationCode();
+
+        return res.status(200).json({
+          status: "pending",
+          message:
+            "Verification code sent to new email. Please verify to complete update.",
+        });
+      } catch (err) {
+        return next(new AppError("Failed to send verification email.", 500));
+      }
+    }
+
+    // Apply allowed updates
+    const allowedFields = ["firstName", "lastName"];
     const filteredUpdates = filterObj(updates, ...allowedFields);
 
-    // 4) Update user
     const updatedUser = await User.findByIdAndUpdate(
       req.user.id,
       filteredUpdates,
@@ -63,6 +91,32 @@ const userController = {
       data: {
         user: updatedUser,
       },
+    });
+  }),
+
+  verifyEmailUpdate: asyncHandler(async (req, res, next) => {
+    const { code } = req.body;
+    const user = await User.findById(req.user.id);
+
+    if (
+      !user ||
+      !user.pendingEmail ||
+      user.pendingEmailVerificationCode !== code ||
+      user.pendingEmailVerificationExpires < Date.now()
+    ) {
+      return next(new AppError("Invalid or expired verification code.", 400));
+    }
+
+    user.email = user.pendingEmail;
+    user.pendingEmail = undefined;
+    user.emailVerificationCode = undefined;
+    user.emailVerificationExpires = undefined;
+    await user.save({ validateBeforeSave: false });
+
+    res.status(200).json({
+      status: "success",
+      message: "Email updated successfully!",
+      data: { email: user.email },
     });
   }),
 
