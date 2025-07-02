@@ -17,7 +17,7 @@ class Email {
     return nodemailer.createTransport({
       host: isProduction ? "smtp.gmail.com" : "smtp.ethereal.email",
       port: 587,
-      secure: false, // use TLS, not SSL
+      secure: false,
       auth: {
         user: isProduction
           ? process.env.GOOGLE_USERNAME
@@ -30,7 +30,7 @@ class Email {
     });
   }
 
-  async sendEmail(template, subject) {
+  async sendEmail(template, subject, customTo = null) {
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = dirname(__filename);
 
@@ -45,7 +45,7 @@ class Email {
 
     const mailOptions = {
       from: this.from,
-      to: this.to,
+      to: customTo || this.to,
       subject,
       html,
     };
@@ -68,6 +68,14 @@ class Email {
 
   async sendEmailVerificationCode() {
     await this.sendEmail("emailVerification", "Verify your Auth API email");
+  }
+
+  async sendEmailVerificationCodeToPendingEmail(newEmail) {
+    await this.sendEmail(
+      "emailVerification",
+      "Verify your new email address",
+      newEmail
+    );
   }
 }
 
