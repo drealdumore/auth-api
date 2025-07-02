@@ -12,6 +12,13 @@ import {
   signRefreshToken,
   createAndSendTokens,
 } from "../helpers/token.js";
+import {
+  NAME_REGEX,
+  EMAIL_REGEX,
+  PASSWORD_REGEX,
+  ACCOUNT_LOCK_TIME_MINUTES,
+  MAX_FAILED_LOGIN_ATTEMPTS,
+} from "../utils/validation.js";
 
 const authController = {
   //Registration
@@ -24,21 +31,21 @@ const authController = {
       return next(new AppError("All fields are required!", 400));
     }
 
-    const trimmedEmail = email.trim();
+    const trimmedEmail = email.trim().toLowerCase();
     const trimmedFirstName = firstName.trim();
     const trimmedLastName = lastName.trim();
 
     // Validate email format
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+    if (!EMAIL_REGEX.test(trimmedEmail)) {
       return next(new AppError("Invalid email format!", 401));
     }
 
     // Validate first and last name
-    if (!/^[a-zA-Z0-9 -]+$/.test(trimmedFirstName)) {
+    if (!NAME_REGEX.test(trimmedFirstName)) {
       return next(new AppError("Invalid first name!", 401));
     }
 
-    if (!/^[a-zA-Z0-9 -]+$/.test(trimmedLastName)) {
+    if (!NAME_REGEX.test(trimmedLastName)) {
       return next(new AppError("Invalid last name!", 401));
     }
 
@@ -46,15 +53,11 @@ const authController = {
     try {
       validateEmailDomain(trimmedEmail);
     } catch (err) {
-      return next(err); // stops further code
+      return next(err);
     }
 
     // Validate password strength
-    if (
-      !/^(?=.*[!@#$%^&*()_+{}\[\]:;<>,.?~\\/-])(?=.*[A-Z])(?=.*[a-z])(?=.*[0-9]).{8,20}$/.test(
-        password
-      )
-    ) {
+    if (!PASSWORD_REGEX.test(password)) {
       return next(
         new AppError(
           "Password must contain at least 1 special character, 1 lowercase letter, and 1 uppercase letter. It must be 8-20 characters long.",
@@ -107,6 +110,7 @@ const authController = {
     }
   }),
 
+  //Login
   login: asyncHandler(async (req, res, next) => {
     const { email, password } = req.body;
 
@@ -114,18 +118,53 @@ const authController = {
       return next(new AppError("Please provide email and password!", 422));
     }
 
-    const trimmedEmail = email.trim();
+    const trimmedEmail = email.trim().toLowerCase();
 
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+    if (!EMAIL_REGEX.test(trimmedEmail)) {
       return next(new AppError("Invalid email format!", 401));
     }
 
     const user = await User.findOne({ email: trimmedEmail }).select(
       "+password"
     );
-    if (!user || !(await user.correctPassword(password, user.password))) {
+
+    if (!user) {
       return next(new AppError("Incorrect email or password", 401));
     }
+
+    if (user.isLocked) {
+      return next(
+        new AppError(
+          "Account locked due to too many failed login attempts. Try again later.",
+          423
+        )
+      ); // 423 Locked
+    }
+
+    const passwordCorrect = await user.correctPassword(password, user.password);
+
+    if (!passwordCorrect) {
+      user.failedLoginAttempts += 1;
+
+      if (user.failedLoginAttempts >= MAX_FAILED_LOGIN_ATTEMPTS) {
+        user.lockUntil = Date.now() + ACCOUNT_LOCK_TIME_MINUTES; // 15 minutes lock
+        await user.save({ validateBeforeSave: false });
+        return next(
+          new AppError(
+            "Account locked due to too many failed login attempts. Try again later.",
+            423
+          )
+        );
+      }
+
+      await user.save({ validateBeforeSave: false });
+      return next(new AppError("Incorrect email or password", 401));
+    }
+
+    // Reset failed attempts on successful login
+    user.failedLoginAttempts = 0;
+    user.lockUntil = null;
+    await user.save({ validateBeforeSave: false });
 
     await createAndSendTokens(user, 200, req, res);
   }),
@@ -134,7 +173,7 @@ const authController = {
   createAdmin: asyncHandler(async (req, res, next) => {
     const { firstName, lastName, email, password, passwordConfirm, role } =
       req.body;
-    const trimmedEmail = email.trim();
+    const trimmedEmail = email.trim().toLowerCase();
 
     try {
       validateEmailDomain(trimmedEmail);
@@ -162,7 +201,11 @@ const authController = {
       return next(new AppError("Please provide email and password!", 400));
     }
 
-    const admin = await User.findOne({ email }).select("+password");
+    const trimmedEmail = email.trim().toLowerCase();
+
+    const admin = await User.findOne({ email: trimmedEmail }).select(
+      "+password"
+    );
     if (!admin || !(await admin.correctPassword(password, admin.password))) {
       return next(new AppError("Incorrect email or password", 401));
     }
@@ -228,7 +271,6 @@ const authController = {
       token = req.cookies.jwt;
     }
 
-    // Add refresh token logic
     if (!token && req.cookies.refreshToken) {
       const refreshToken = req.cookies.refreshToken;
 
@@ -238,21 +280,36 @@ const authController = {
           process.env.JWT_REFRESH_SECRET
         );
 
-        const user = await User.findById(decodedRefresh.id);
-        if (!user) {
+        // Check if refresh token exists in DB (reuse detection)
+        const storedToken = await Token.findOne({ token: refreshToken });
+
+        if (!storedToken) {
+          // Token reuse detected: revoke all user's tokens
+          await Token.deleteMany({ user: decodedRefresh.id });
           return next(
             new AppError(
-              "The user belonging to this refresh token no longer exists.",
+              "Refresh token reuse detected! Please log in again.",
               401
             )
           );
         }
 
-        // Issue new access token
-        token = signToken(user._id);
+        // Valid refresh token: issue new tokens & rotate
+        const user = await User.findById(decodedRefresh.id);
+        if (!user) {
+          return next(
+            new AppError("User no longer exists for this refresh token.", 401)
+          );
+        }
 
-        // Rotate refresh token
+        // Generate new tokens
+        token = signToken(user._id);
         const newRefreshToken = signRefreshToken(user._id);
+
+        // Replace old refresh token with new one
+        storedToken.token = newRefreshToken;
+        await storedToken.save();
+
         res.cookie("refreshToken", newRefreshToken, {
           httpOnly: true,
           secure: process.env.NODE_ENV === "production",
@@ -281,25 +338,25 @@ const authController = {
       );
     }
 
-    //   Verify Token
+    // Verify access token
     const decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET);
 
-    // Check is user EXISTS
     const currentUser = await User.findById(decoded.id);
     if (!currentUser) {
       return next(
-        new AppError("The user belonging to this token no longer exists..")
+        new AppError("The user belonging to this token no longer exists.", 401)
       );
     }
 
-    // Check is user changed password after the token was issued
     if (currentUser.changedPasswordAfter(decoded.iat)) {
       return next(
-        new AppError("User recently changed password! Please log in again.")
+        new AppError(
+          "User recently changed password! Please log in again.",
+          401
+        )
       );
     }
 
-    // IF everything is okay, Grant access to protected route
     req.user = currentUser;
     res.locals.user = currentUser;
     next();
@@ -398,9 +455,11 @@ const authController = {
   updatePassword: asyncHandler(async (req, res, next) => {
     const { currentPassword, newPassword, newPasswordConfirm } = req.body;
 
-  if (!currentPassword || !newPassword) {
-    return next(new AppError("Please provide current and new passwords.", 400));
-  }
+    if (!currentPassword || !newPassword) {
+      return next(
+        new AppError("Please provide current and new passwords.", 400)
+      );
+    }
 
     // 1) Get the user from the collection
     const user = await User.findById(req.user.id).select("+password");
@@ -448,6 +507,7 @@ const authController = {
     // Optionally, log the user in by sending new tokens
     await createAndSendTokens(user, 200, req, res);
   }),
+
 
   //Protect Routes for verified users
   protectVerified: asyncHandler(async (req, res, next) => {
