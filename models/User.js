@@ -55,17 +55,34 @@ const userSchema = new Schema(
       type: Boolean,
       default: true,
     },
+
     emailVerified: {
       type: Boolean,
       default: false,
     },
+
+    pendingEmail: {
+      type: String,
+      lowercase: true,
+      trim: true,
+    },
+    pendingEmailVerificationCode: String,
+    pendingEmailVerificationExpires: Date,
+
     emailVerificationCode: String,
     emailVerificationExpires: Date,
     emailVerificationToken: String,
+    
+    failedLoginAttempts: { type: Number, default: 0 },
+    lockUntil: { type: Date, default: null },
   },
 
   { timestamps: true }
 );
+
+userSchema.virtual("isLocked").get(function () {
+  return !!(this.lockUntil && this.lockUntil > Date.now());
+});
 
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
