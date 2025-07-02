@@ -4,6 +4,7 @@ import { promisify } from "util";
 import AppError from "../utils/appError.js";
 import Token from "../models/Token.js";
 import User from "../models/User.js";
+import { COOKIE_OPTIONS } from "../utils/validation.js";
 
 // Sign Access Token
 export const signToken = (id) => {
@@ -92,9 +93,7 @@ export const createAndSendTokens = async (user, statusCode, req, res) => {
   });
 
   res.cookie("refreshToken", refreshToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "strict",
+    ...COOKIE_OPTIONS,
     expires: new Date(
       Date.now() +
         process.env.JWT_REFRESH_COOKIE_EXPIRES_IN * 24 * 60 * 60 * 1000
