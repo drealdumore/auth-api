@@ -26,6 +26,7 @@ Auth API/
 ├── app.js                # Main application file
 ├── server.js             # Server setup
 ├── package.json          # Project dependencies and scripts
+├── domains.json          # Invalid domains
 ├── controllers/          # Application controllers
 ├── models/               # Mongoose models
 ├── routes/               # API routes
