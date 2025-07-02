@@ -508,6 +508,93 @@ const authController = {
     await createAndSendTokens(user, 200, req, res);
   }),
 
+  // Request change
+  requestEmailChange: asyncHandler(async (req, res, next) => {
+    const { newEmail } = req.body;
+
+    if (!newEmail || !EMAIL_REGEX.test(newEmail)) {
+      return next(new AppError("Please provide a valid new email!", 400));
+    }
+
+    // Get current user
+    const user = await User.findById(req.user.id);
+
+    // Check if the new email is the same as the current email
+    const newEmailNormalized = newEmail.trim().toLowerCase();
+    if (user.email === newEmailNormalized) {
+      return next(
+        new AppError("You are already using this email address!", 400)
+      );
+    }
+
+    // Check if email is taken by another user
+    const existing = await User.findOne({ email: newEmail });
+    if (existing) {
+      return next(new AppError("This email is already in use!", 409));
+    }
+
+    try {
+      // Generate 6-digit code
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+
+      // Save to user doc
+      user.pendingEmail = newEmail;
+      user.pendingEmailVerificationCode = code;
+      user.pendingEmailVerificationExpires = Date.now() + 10 * 60 * 1000;
+
+      await user.save({ validateBeforeSave: false });
+
+      // Send email to new address
+      const sendEmail = new Email(user, code);
+      await sendEmail.sendEmailVerificationCodeToPendingEmail?.(newEmail);
+
+      res.status(200).json({
+        status: "success",
+        code,
+        message: "Verification code sent to new email address.",
+      });
+    } catch (error) {
+      console.log("EMAIL ERROR", error);
+      return next(new AppError("Failed to send verification email!", 500));
+    }
+  }),
+
+  // Confirm change
+  confirmEmailChange: asyncHandler(async (req, res, next) => {
+    const { code } = req.body;
+    if (!code) {
+      return next(new AppError("Please provide the verification code.", 400));
+    }
+
+    const user = await User.findById(req.user.id);
+
+    if (
+      !user.pendingEmail ||
+      code !== user.pendingEmailVerificationCode ||
+      user.pendingEmailVerificationExpires < Date.now()
+    ) {
+      return next(
+        new AppError(
+          "Invalid or expired verification code for email update!",
+          400
+        )
+      );
+    }
+
+    // Apply the pending email update
+    user.email = user.pendingEmail;
+    user.emailVerified = false;
+    user.pendingEmail = undefined;
+    user.pendingEmailVerificationCode = undefined;
+    user.pendingEmailVerificationExpires = undefined;
+
+    await user.save({ validateBeforeSave: false });
+
+    res.status(200).json({
+      status: "success",
+      message: "Email address updated successfully.",
+    });
+  }),
 
   //Protect Routes for verified users
   protectVerified: asyncHandler(async (req, res, next) => {
