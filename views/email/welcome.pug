@@ -1,9 +1,10 @@
 extends baseEmail
 
 block content
-  p Hello #{firstName},
-  p Welcome to Auth API, we're glad to have you 💝
-  p Thank you for joining Auth API. We are excited to have you on board!!
-
-  p Best regards, 
-  p Auth API Team
+  div(style="padding:60px 30px 30px 30px;border:1px solid #ccd1d6;border-radius:8px")
+    h2(style="margin-bottom:20px;font-size:20px;color:#333") Welcome to Auth API!
+    p(style="font-size:16px;margin-bottom:16px;color:#444") Hello #{firstName},
+    p(style="font-size:16px;margin-bottom:16px;color:#444") We're glad to have you 💝
+    p(style="font-size:16px;margin-bottom:16px;color:#444") Thank you for joining Auth API. We are excited to have you on board!
+    p(style="font-size:16px;color:#57584e;margin:0;margin-top:24px") Best regards,
+    p(style="font-size:16px;color:#57584e;") Auth API Team
