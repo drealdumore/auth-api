@@ -61,7 +61,7 @@ const userController = {
 
       try {
         const sendEmail = new Email(user, verificationCode);
-        await sendEmail.sendEmailVerificationCode();
+        await sendEmail.sendEmailVerificationCodeToPendingEmail?.(newEmail);
 
         return res.status(200).json({
           status: "pending",
@@ -69,6 +69,7 @@ const userController = {
             "Verification code sent to new email. Please verify to complete update.",
         });
       } catch (err) {
+        console.log("EMAIL ERROR", error);
         return next(new AppError("Failed to send verification email.", 500));
       }
     }
@@ -96,6 +97,11 @@ const userController = {
 
   verifyEmailUpdate: asyncHandler(async (req, res, next) => {
     const { code } = req.body;
+
+    if (!code) {
+      return next(new AppError("Please provide the verification code.", 400));
+    }
+
     const user = await User.findById(req.user.id);
 
     if (
@@ -108,14 +114,16 @@ const userController = {
     }
 
     user.email = user.pendingEmail;
+    user.emailVerified = false;
     user.pendingEmail = undefined;
     user.emailVerificationCode = undefined;
     user.emailVerificationExpires = undefined;
+
     await user.save({ validateBeforeSave: false });
 
     res.status(200).json({
       status: "success",
-      message: "Email updated successfully!",
+      message: "Email address updated successfully!",
       data: { email: user.email },
     });
   }),

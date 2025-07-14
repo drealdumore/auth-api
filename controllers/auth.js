@@ -451,7 +451,7 @@ const authController = {
     await createAndSendTokens(user, 200, req, res);
   }),
 
-  //Update Password
+  // Update Password
   updatePassword: asyncHandler(async (req, res, next) => {
     const { currentPassword, newPassword, newPasswordConfirm } = req.body;
 
@@ -508,91 +508,79 @@ const authController = {
     await createAndSendTokens(user, 200, req, res);
   }),
 
-  // Request change
+  // Request email change
   requestEmailChange: asyncHandler(async (req, res, next) => {
     const { newEmail } = req.body;
-
-    if (!newEmail || !EMAIL_REGEX.test(newEmail)) {
-      return next(new AppError("Please provide a valid new email!", 400));
+    if (!newEmail) {
+      return next(new AppError("Please provide the new email address.", 400));
     }
-
-    // Get current user
-    const user = await User.findById(req.user.id);
-
-    // Check if the new email is the same as the current email
-    const newEmailNormalized = newEmail.trim().toLowerCase();
-    if (user.email === newEmailNormalized) {
-      return next(
-        new AppError("You are already using this email address!", 400)
-      );
+    // Validate new email format
+    if (!EMAIL_REGEX.test(newEmail)) {
+      return next(new AppError("Invalid email format!", 400));
     }
-
-    // Check if email is taken by another user
-    const existing = await User.findOne({ email: newEmail });
-    if (existing) {
-      return next(new AppError("This email is already in use!", 409));
-    }
-
+    // Validate email domain
     try {
-      // Generate 6-digit code
-      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      validateEmailDomain(newEmail);
+    } catch (err) {
+      return next(err);
+    }
+    // Check if new email is already taken
+    const existingUser = await User.findOne({ email: newEmail });
+    if (existingUser) {
+      return next(new AppError("Email address already in use!", 400));
+    }
+    // Generate secure token and expiry
+    const token = crypto.randomBytes(32).toString("hex");
+    const tokenExpires = Date.now() + 15 * 60 * 1000; // 15 minutes
+    // Save pending email and token to user
+    const user = await User.findById(req.user.id);
+    user.pendingEmail = newEmail.trim().toLowerCase();
+    user.emailChangeToken = token;
+    user.emailChangeTokenExpires = tokenExpires;
+    await user.save({ validateBeforeSave: false });
 
-      // Save to user doc
-      user.pendingEmail = newEmail;
-      user.pendingEmailVerificationCode = code;
-      user.pendingEmailVerificationExpires = Date.now() + 10 * 60 * 1000;
-
-      await user.save({ validateBeforeSave: false });
-
-      // Send email to new address
-      const sendEmail = new Email(user, code);
-      await sendEmail.sendEmailVerificationCodeToPendingEmail?.(newEmail);
-
-      res.status(200).json({
-        status: "success",
-        code,
-        message: "Verification code sent to new email address.",
+    // Send confirmation email to current email
+    const confirmUrl = `${req.protocol}://${req.get(
+      "host"
+    )}/api/users/confirm-email-change?token=${token}`;
+    
+    try {
+      const sendEmail = new Email(user, confirmUrl);
+      await sendEmail.sendEmailChangeConfirmation();
+      return res.status(200).json({
+        status: "pending",
+        message: "Confirmation email sent to your current address.",
       });
     } catch (error) {
-      console.log("EMAIL ERROR", error);
-      return next(new AppError("Failed to send verification email!", 500));
+      return next(new AppError("Failed to send confirmation email!", 500));
     }
   }),
 
-  // Confirm change
+  // Confirm email change via token
   confirmEmailChange: asyncHandler(async (req, res, next) => {
-    const { code } = req.body;
-    if (!code) {
-      return next(new AppError("Please provide the verification code.", 400));
+    const { token } = req.query;
+    if (!token) {
+      return next(new AppError("Missing token.", 400));
     }
-
-    const user = await User.findById(req.user.id);
-
+    const user = await User.findOne({ emailChangeToken: token });
     if (
+      !user ||
       !user.pendingEmail ||
-      code !== user.pendingEmailVerificationCode ||
-      user.pendingEmailVerificationExpires < Date.now()
+      user.emailChangeTokenExpires < Date.now()
     ) {
-      return next(
-        new AppError(
-          "Invalid or expired verification code for email update!",
-          400
-        )
-      );
+      return next(new AppError("Invalid or expired token.", 400));
     }
-
-    // Apply the pending email update
+    // Update email and clear fields
     user.email = user.pendingEmail;
-    user.emailVerified = false;
     user.pendingEmail = undefined;
-    user.pendingEmailVerificationCode = undefined;
-    user.pendingEmailVerificationExpires = undefined;
-
+    user.emailChangeToken = undefined;
+    user.emailChangeTokenExpires = undefined;
+    user.emailVerified = false;
     await user.save({ validateBeforeSave: false });
-
-    res.status(200).json({
+    return res.status(200).json({
       status: "success",
       message: "Email address updated successfully.",
+      data: { email: user.email },
     });
   }),
 

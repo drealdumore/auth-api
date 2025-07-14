@@ -35,6 +35,7 @@ userRouter.patch("/updateMyPassword", authController.updatePassword);
 userRouter.patch("/updateMe", userController.updateMe);
 
 userRouter.patch("/requestEmailChange", authController.requestEmailChange);
+userRouter.get("/confirm-email-change", authController.confirmEmailChange);
 userRouter.post("/confirmEmailChange", authController.confirmEmailChange);
 
 userRouter.post("/verifyEmailUpdate", userController.verifyEmailUpdate);

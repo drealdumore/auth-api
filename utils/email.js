@@ -77,6 +77,13 @@ class Email {
       newEmail
     );
   }
+
+  async sendEmailChangeConfirmation() {
+    await this.sendEmail(
+      "emailChangeConfirmation",
+      "Confirm your email change request"
+    );
+  }
 }
 
 export default Email;

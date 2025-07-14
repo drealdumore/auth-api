@@ -66,13 +66,16 @@ const userSchema = new Schema(
       lowercase: true,
       trim: true,
     },
+    emailChangeToken: String,
+    emailChangeTokenExpires: Date,
+
     pendingEmailVerificationCode: String,
     pendingEmailVerificationExpires: Date,
 
     emailVerificationCode: String,
     emailVerificationExpires: Date,
     emailVerificationToken: String,
-    
+
     failedLoginAttempts: { type: Number, default: 0 },
     lockUntil: { type: Date, default: null },
   },
